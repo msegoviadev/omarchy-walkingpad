@@ -1,0 +1,46 @@
+{
+  "schemaVersion": 1,
+  "id": "msegoviadev.walkingpad",
+  "name": "WalkingPad",
+  "version": "1.0.0",
+  "author": "msegoviadev",
+  "license": "MIT",
+  "description": "KingSmith WalkingPad steps in the bar, with a GitHub-style history popup",
+  "kinds": [
+    "bar-widget"
+  ],
+  "entryPoints": {
+    "barWidget": "BarWidget.qml"
+  },
+  "barWidget": {
+    "displayName": "WalkingPad",
+    "description": "Daily steps from your KingSmith WalkingPad, goal tracking and history",
+    "category": "Health",
+    "allowMultiple": false,
+    "defaultSection": "center",
+    "defaults": {
+      "goalSteps": 0,
+      "units": "Auto"
+    },
+    "schema": [
+      {
+        "key": "goalSteps",
+        "type": "integer",
+        "label": "Daily step goal",
+        "description": "Steps per day that count as a goal-met day. 0 disables the goal.",
+        "min": 0,
+        "max": 100000,
+        "step": 500,
+        "defaultValue": 0
+      },
+      {
+        "key": "units",
+        "type": "enum",
+        "label": "Units",
+        "description": "Auto follows your system locale (US English uses imperial).",
+        "options": ["Auto", "Metric", "Imperial"],
+        "defaultValue": "Auto"
+      }
+    ]
+  }
+}

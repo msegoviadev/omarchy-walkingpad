@@ -1,0 +1,1 @@
+walkingpad-controller[wilink]>=0.5.1
