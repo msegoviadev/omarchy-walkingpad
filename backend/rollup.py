@@ -46,7 +46,9 @@ FINAL_DUPLICATE_WINDOW = 6 * 3600  # a "final" record near live records is one
 # these caps stop a wedged or planted file from exhausting the shell's poll.
 MAX_HISTORY_BYTES = 8 * 1024 * 1024
 MAX_HISTORY_LINES = 100_000
-MAX_ROLLUP_BYTES = 4 * 1024 * 1024  # one small JSON object per day
+# One compact day entry is ~160 B, so 4 MB fits ~26,700 days (~73 years);
+# this is a hostile/corrupt file backstop, not a usage limit.
+MAX_ROLLUP_BYTES = 4 * 1024 * 1024
 
 
 def local_date(ts: float) -> date:
