@@ -32,6 +32,7 @@ import time
 from datetime import date, timedelta
 from pathlib import Path
 
+import safeio
 from rollup import aggregate_days, load_records, load_rollup
 
 DATA_DIR = Path.home() / ".local" / "share" / "walkingpad"
@@ -41,6 +42,8 @@ CONFIG_FILE = Path.home() / ".config" / "walkingpad" / "config.json"
 
 GRID_WEEKS = 15
 LIVE_MAX_AGE = 10.0  # seconds before status.json counts as stale
+MAX_STATE_BYTES = 64 * 1024  # status, devices, config are all tiny by design
+MAX_OUTPUT_BYTES = 256 * 1024  # the shell buffers our whole stdout; backstop
 
 EMPTY_DAY = {
     "steps": 0,
@@ -114,10 +117,8 @@ def service_enabled() -> bool:
 
 
 def live_status():
-    try:
-        with open(STATUS_FILE) as fh:
-            status = json.load(fh)
-    except (OSError, ValueError):
+    status = safeio.read_json(STATUS_FILE, MAX_STATE_BYTES)
+    if not isinstance(status, dict):
         return None
     if time.time() - float(status.get("ts", 0)) > LIVE_MAX_AGE:
         return None
@@ -128,20 +129,17 @@ def live_status():
 
 def known_devices():
     """Pads seen by the collector, strongest signal first."""
-    try:
-        with open(DEVICES_FILE) as fh:
-            devices = json.load(fh)
-    except (OSError, ValueError):
+    devices = safeio.read_json(DEVICES_FILE, MAX_STATE_BYTES)
+    if not isinstance(devices, dict):
         return []
     return sorted(devices.values(), key=lambda d: d.get("rssi") or -999, reverse=True)
 
 
 def selected_address() -> str:
-    try:
-        with open(CONFIG_FILE) as fh:
-            return str(json.load(fh).get("device_address", "")).strip()
-    except (OSError, ValueError):
+    config = safeio.read_json(CONFIG_FILE, MAX_STATE_BYTES)
+    if not isinstance(config, dict):
         return ""
+    return str(config.get("device_address", "")).strip()
 
 
 def main() -> None:
@@ -172,37 +170,39 @@ def main() -> None:
     if totals["time_s"] > 0:
         totals["avg_speed"] = round(totals["dist_m"] / totals["time_s"] * 3.6, 1)
 
-    print(
-        json.dumps(
-            {
-                "enabled": service_enabled(),
-                "connected": bool(live),
-                "walking": bool(live and live.get("walking")),
-                "live": {
-                    "steps": live.get("steps", 0),
-                    "dist_m": live.get("dist_m", 0),
-                    "time_s": live.get("time_s", 0),
-                    "speed": live.get("speed", 0.0),
-                    "session_start": live.get("session_start"),
-                    "device_name": live.get("device_name", ""),
-                    "address": live.get("address", ""),
-                }
-                if live
-                else None,
-                "today": today_stats,
-                "start": grid_start.isoformat(),
-                "days": {
-                    day.isoformat(): stats
-                    for day, stats in days.items()
-                    if day >= grid_start and stats["steps"] > 0
-                },
-                "streak": compute_streak(days, args.goal),
-                "totals": totals,
-                "devices": known_devices(),
-                "selected_address": selected_address(),
+    out = json.dumps(
+        {
+            "enabled": service_enabled(),
+            "connected": bool(live),
+            "walking": bool(live and live.get("walking")),
+            "live": {
+                "steps": live.get("steps", 0),
+                "dist_m": live.get("dist_m", 0),
+                "time_s": live.get("time_s", 0),
+                "speed": live.get("speed", 0.0),
+                "session_start": live.get("session_start"),
+                "device_name": live.get("device_name", ""),
+                "address": live.get("address", ""),
             }
-        )
+            if live
+            else None,
+            "today": today_stats,
+            "start": grid_start.isoformat(),
+            "days": {
+                day.isoformat(): stats
+                for day, stats in days.items()
+                if day >= grid_start and stats["steps"] > 0
+            },
+            "streak": compute_streak(days, args.goal),
+            "totals": totals,
+            "devices": known_devices(),
+            "selected_address": selected_address(),
+        }
     )
+    # The shell buffers our complete stdout; never emit an oversized blob.
+    if len(out) > MAX_OUTPUT_BYTES:
+        sys.exit("stats output exceeds size cap")
+    print(out)
 
 
 if __name__ == "__main__":

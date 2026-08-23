@@ -12,7 +12,10 @@ import json
 import sys
 from pathlib import Path
 
+import safeio
+
 CONFIG_FILE = Path.home() / ".config" / "walkingpad" / "config.json"
+MAX_CONFIG_BYTES = 64 * 1024
 
 
 def main() -> int:
@@ -21,10 +24,8 @@ def main() -> int:
         return 2
 
     arg = sys.argv[1].strip()
-    try:
-        config = json.loads(CONFIG_FILE.read_text())
-    except (OSError, ValueError):
-        config = {}
+    existing = safeio.read_json(CONFIG_FILE, MAX_CONFIG_BYTES)
+    config = existing if isinstance(existing, dict) else {}
 
     if arg.lower() in ("auto", ""):
         config.pop("device_address", None)
@@ -32,7 +33,7 @@ def main() -> int:
         config["device_address"] = arg.upper()
 
     CONFIG_FILE.parent.mkdir(parents=True, exist_ok=True)
-    CONFIG_FILE.write_text(json.dumps(config, indent=2) + "\n")
+    safeio.atomic_write(CONFIG_FILE, json.dumps(config, indent=2) + "\n")
     print("selected:", config.get("device_address", "auto"))
     return 0
 

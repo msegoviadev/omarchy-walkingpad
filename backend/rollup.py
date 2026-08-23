@@ -26,7 +26,6 @@ Rollup layout:
 """
 
 import json
-import os
 import statistics
 import sys
 from bisect import bisect_left
@@ -34,12 +33,20 @@ from collections import defaultdict
 from datetime import date, datetime, timedelta
 from pathlib import Path
 
+import safeio
+
 DATA_DIR = Path.home() / ".local" / "share" / "walkingpad"
 HISTORY_FILE = DATA_DIR / "history.jsonl"
 ROLLUP_FILE = DATA_DIR / "rollup.json"
 
 FINAL_DUPLICATE_WINDOW = 6 * 3600  # a "final" record near live records is one
 # we recorded ourselves; skip it to avoid double counting
+
+# history.jsonl normally holds only today's records (hundreds of lines);
+# these caps stop a wedged or planted file from exhausting the shell's poll.
+MAX_HISTORY_BYTES = 8 * 1024 * 1024
+MAX_HISTORY_LINES = 100_000
+MAX_ROLLUP_BYTES = 4 * 1024 * 1024  # one small JSON object per day
 
 
 def local_date(ts: float) -> date:
@@ -53,26 +60,23 @@ def load_records(since: date | None = None) -> list:
     if since is not None:
         cutoff = datetime.combine(since, datetime.min.time()).timestamp()
     records = []
-    try:
-        with open(HISTORY_FILE) as fh:
-            for line in fh:
-                line = line.strip()
-                if not line:
-                    continue
-                if cutoff is not None:
-                    # Every record is written with "ts" as the first key.
-                    try:
-                        ts = float(line[6 : line.index(",", 6)])
-                    except (ValueError, IndexError):
-                        continue
-                    if ts < cutoff:
-                        continue
-                try:
-                    records.append(json.loads(line))
-                except ValueError:
-                    continue
-    except OSError:
-        pass
+    lines = safeio.read_lines(HISTORY_FILE, MAX_HISTORY_BYTES, MAX_HISTORY_LINES)
+    for line in lines or []:
+        line = line.strip()
+        if not line:
+            continue
+        if cutoff is not None:
+            # Every record is written with "ts" as the first key.
+            try:
+                ts = float(line[6 : line.index(",", 6)])
+            except (ValueError, IndexError):
+                continue
+            if ts < cutoff:
+                continue
+        try:
+            records.append(json.loads(line))
+        except ValueError:
+            continue
     return records
 
 
@@ -174,11 +178,8 @@ def aggregate_days(
 
 
 def load_rollup() -> dict | None:
-    try:
-        with open(ROLLUP_FILE) as fh:
-            return json.load(fh)
-    except (OSError, ValueError):
-        return None
+    rollup = safeio.read_json(ROLLUP_FILE, MAX_ROLLUP_BYTES)
+    return rollup if isinstance(rollup, dict) else None
 
 
 def rebuild_needed(today: date | None = None) -> bool:
@@ -199,28 +200,24 @@ def truncate_history(today: date) -> int:
     kept rather than silently lost."""
     cutoff = datetime.combine(today, datetime.min.time()).timestamp()
     kept, dropped = [], 0
-    try:
-        with open(HISTORY_FILE) as fh:
-            for line in fh:
-                stripped = line.strip()
-                if not stripped:
-                    continue
-                # Every record is written with "ts" as the first key.
-                try:
-                    ts = float(stripped[6 : stripped.index(",", 6)])
-                except (ValueError, IndexError):
-                    kept.append(line)
-                    continue
-                if ts >= cutoff:
-                    kept.append(line)
-                else:
-                    dropped += 1
-    except OSError:
+    lines = safeio.read_lines(HISTORY_FILE, MAX_HISTORY_BYTES, MAX_HISTORY_LINES)
+    if lines is None:
         return 0
-    tmp = HISTORY_FILE.with_suffix(".tmp")
-    with open(tmp, "w") as fh:
-        fh.writelines(kept)
-    os.replace(tmp, HISTORY_FILE)
+    for line in lines:
+        stripped = line.strip()
+        if not stripped:
+            continue
+        # Every record is written with "ts" as the first key.
+        try:
+            ts = float(stripped[6 : stripped.index(",", 6)])
+        except (ValueError, IndexError):
+            kept.append(line)
+            continue
+        if ts >= cutoff:
+            kept.append(line)
+        else:
+            dropped += 1
+    safeio.atomic_write(HISTORY_FILE, "".join(line + "\n" for line in kept))
     return dropped
 
 
@@ -294,10 +291,7 @@ def rebuild_rollup(today: date | None = None) -> tuple[dict, int]:
         "days": days,
     }
     DATA_DIR.mkdir(parents=True, exist_ok=True)
-    tmp = ROLLUP_FILE.with_suffix(".tmp")
-    with open(tmp, "w") as fh:
-        json.dump(rollup, fh, separators=(",", ":"))
-    os.replace(tmp, ROLLUP_FILE)
+    safeio.atomic_write(ROLLUP_FILE, json.dumps(rollup, separators=(",", ":")))
     dropped = truncate_history(today)
     return rollup, dropped
 

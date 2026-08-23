@@ -462,6 +462,7 @@ Panel {
                 anchors.leftMargin: 8
                 anchors.verticalCenter: parent.verticalCenter
                 text: "󰜎 " + (root.padDisplayName() || "Walking pad")
+                textFormat: Text.PlainText  // BLE-controlled device name
                 color: root.connected ? root.accent : root.foreground
                 font.family: root.fontFamily
                 font.pixelSize: Style.font.bodySmall
@@ -545,6 +546,7 @@ Panel {
                     anchors.leftMargin: 8
                     anchors.verticalCenter: parent.verticalCenter
                     text: (modelData.name || modelData.address) + (modelData.protocol ? " · " + modelData.protocol : "")
+                    textFormat: Text.PlainText  // BLE-controlled name/protocol
                     color: root.foreground
                     font.family: root.fontFamily
                     font.pixelSize: Style.font.caption

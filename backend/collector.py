@@ -35,7 +35,6 @@ The file is watched: changes apply within seconds, no restart needed.
 import asyncio
 import json
 import logging
-import os
 import signal
 import time
 import uuid
@@ -43,6 +42,7 @@ from datetime import date
 from pathlib import Path
 
 import rollup
+import safeio
 from bleak import BleakScanner
 from walkingpad_controller import WalkingPadController
 
@@ -57,6 +57,8 @@ RETRY_DELAY = 5.0
 SESSION_END_AFTER = 15.0  # seconds of inactive belt before closing a session
 STATUS_MIN_INTERVAL = 1.0  # throttle status.json writes
 DEVICE_FORGET_AFTER = 24 * 3600  # drop pads not seen for a day
+MAX_STATE_BYTES = 64 * 1024  # status, devices, config are all tiny by design
+MAX_NAME_LENGTH = 64  # BLE names are short; cap before storage and QML
 
 # BLE name prefixes of supported pads that do not contain "walkingpad"
 # and are not covered by the generic "KS-" KingSmith prefix.
@@ -73,11 +75,15 @@ log = logging.getLogger("walkingpad-collector")
 
 
 def load_config() -> dict:
-    try:
-        with open(CONFIG_FILE) as fh:
-            return json.load(fh)
-    except (OSError, ValueError):
-        return {}
+    config = safeio.read_json(CONFIG_FILE, MAX_STATE_BYTES)
+    return config if isinstance(config, dict) else {}
+
+
+def sanitize_name(name) -> str:
+    """BLE names come from the radio; keep only printable characters and
+    cap the length before they reach storage and QML."""
+    cleaned = "".join(ch for ch in str(name or "") if ch.isprintable())
+    return cleaned[:MAX_NAME_LENGTH]
 
 
 def config_mtime() -> float:
@@ -142,8 +148,7 @@ class Collector:
 
     def append_history(self, record: dict) -> None:
         try:
-            with open(HISTORY_FILE, "a") as fh:
-                fh.write(json.dumps(record, separators=(",", ":")) + "\n")
+            safeio.append_line(HISTORY_FILE, json.dumps(record, separators=(",", ":")))
         except OSError:
             log.exception("Failed to append history")
 
@@ -155,7 +160,7 @@ class Collector:
         payload = {
             "enabled": True,
             "connected": connected,
-            "device_name": self.controller.name if self.controller else "",
+            "device_name": sanitize_name(self.controller.name or "") if self.controller else "",
             "address": self.controller.address if self.controller else "",
             "state": status.belt_state if status else 0,
             "walking": bool(status and status.belt_state == 1),
@@ -166,26 +171,19 @@ class Collector:
             "session_start": self.session_start if self.session_id else None,
             "ts": now,
         }
-        tmp = STATUS_FILE.with_suffix(".tmp")
         try:
-            with open(tmp, "w") as fh:
-                json.dump(payload, fh, separators=(",", ":"))
-            os.replace(tmp, STATUS_FILE)
+            safeio.atomic_write(STATUS_FILE, json.dumps(payload, separators=(",", ":")))
         except OSError:
             log.exception("Failed to write status")
 
     def remember_devices(self, candidates: list) -> None:
         """Update the seen-pads registry consumed by the widget's picker."""
         now = time.time()
-        devices = {}
-        try:
-            with open(DEVICES_FILE) as fh:
-                devices = json.load(fh)
-        except (OSError, ValueError):
-            pass
+        existing = safeio.read_json(DEVICES_FILE, MAX_STATE_BYTES)
+        devices = existing if isinstance(existing, dict) else {}
         for device, adv in candidates:
             devices[device.address] = {
-                "name": device.name or "",
+                "name": sanitize_name(device.name or ""),
                 "address": device.address,
                 "rssi": adv.rssi,
                 "protocol": protocol_hint(adv.service_uuids),
@@ -196,11 +194,8 @@ class Collector:
             for address, info in devices.items()
             if now - float(info.get("last_seen", 0)) < DEVICE_FORGET_AFTER
         }
-        tmp = DEVICES_FILE.with_suffix(".tmp")
         try:
-            with open(tmp, "w") as fh:
-                json.dump(devices, fh, separators=(",", ":"))
-            os.replace(tmp, DEVICES_FILE)
+            safeio.atomic_write(DEVICES_FILE, json.dumps(devices, separators=(",", ":")))
         except OSError:
             log.exception("Failed to write devices")
 
