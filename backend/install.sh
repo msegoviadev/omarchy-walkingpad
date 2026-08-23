@@ -17,8 +17,7 @@ mkdir -p "$DATA_DIR" "$UNIT_DIR"
 
 echo "Creating Python environment in $DATA_DIR/venv ..."
 python3 -m venv "$DATA_DIR/venv"
-"$DATA_DIR/venv/bin/pip" install --quiet --upgrade pip
-"$DATA_DIR/venv/bin/pip" install --quiet --requirement "$PLUGIN_DIR/backend/requirements.txt"
+"$DATA_DIR/venv/bin/pip" install --quiet --require-hashes --requirement "$PLUGIN_DIR/backend/requirements.txt"
 
 echo "Installing systemd user service ..."
 cat > "$UNIT" <<EOF

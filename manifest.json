@@ -2,7 +2,7 @@
   "schemaVersion": 1,
   "id": "msegoviadev.walkingpad",
   "name": "WalkingPad",
-  "version": "1.0.0",
+  "version": "1.0.1",
   "author": "msegoviadev",
   "license": "MIT",
   "description": "KingSmith WalkingPad steps in the bar, with a GitHub-style history popup",
